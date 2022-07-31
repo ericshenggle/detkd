@@ -495,6 +495,15 @@ class LoadImagesAndLabels(Dataset):
         self.batch = bi  # batch index of image
         self.n = n
         self.indices = range(n)
+        if self.is_coco[0] == 1:
+            for y, is_coco in enumerate(self.is_coco):
+                if is_coco == 0:
+                    break
+        else:
+            for y, is_coco in enumerate(self.is_coco):
+                if is_coco == 1:
+                    break
+        self.indices_split = y
 
         # Update labels
         include_class = []  # filter labels to include only these classes (optional)
@@ -684,8 +693,14 @@ class LoadImagesAndLabels(Dataset):
         # Convert
         img = img.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
         img = np.ascontiguousarray(img)
+        if index < self.indices_split and self.is_coco[0] == 1:
+            is_coco = 1
+        elif index >= self.indices_split and self.is_coco[0] == 0:
+            is_coco = 1
+        else:
+            is_coco = 0
 
-        return torch.from_numpy(img), labels_out, self.im_files[index], shapes, feats_out
+        return torch.from_numpy(img), labels_out, self.im_files[index], shapes, feats_out, is_coco
 
     def load_image(self, i):
         # Loads 1 image from dataset index 'i', returns (im, original hw, resized hw)
@@ -729,7 +744,7 @@ class LoadImagesAndLabels(Dataset):
         feats4 = []
         s = self.img_size
         yc, xc = (int(random.uniform(-x, 2 * s + x)) for x in self.mosaic_border)  # mosaic center x, y
-        indices = [index] + random.choices(self.indices, k=3)  # 3 additional image indices
+        indices = [index] + random.choices(self.indices[:self.indices_split] if index < self.indices_split else self.indices[self.indices_split:], k=3)  # 3 additional image indices
         random.shuffle(indices)
         for i, index in enumerate(indices):
             # Load image
@@ -759,25 +774,24 @@ class LoadImagesAndLabels(Dataset):
             if labels.size:
                 labels[:, 1:] = xywhn2xyxy(labels[:, 1:], w, h, padw, padh)  # normalized xywh to pixel xyxy format
                 segments = [xyn2xy(x, w, h, padw, padh) for x in segments]
+            labels4.append(labels)
             if is_coco:
-                labels4.append(labels)
                 feats = self.load_feats(index)
-                feats4.append(feats)
+            else:
+                feats = np.zeros((len(labels), 512), dtype=np.float32)
+            feats4.append(feats)
             segments4.extend(segments)
 
         # Concat/clip labels
-        if labels4:
-            labels4 = np.concatenate(labels4, 0)
-            for x in (labels4[:, 1:], *segments4):
-                np.clip(x, 0, 2 * s, out=x)  # clip when using random_perspective()
-        if feats4:
-            feats4 = np.concatenate(feats4, 0)
+        labels4 = np.concatenate(labels4, 0)
+        for x in (labels4[:, 1:], *segments4):
+            np.clip(x, 0, 2 * s, out=x)  # clip when using random_perspective()
+        feats4 = np.concatenate(feats4, 0)
         # img4, labels4 = replicate(img4, labels4)  # replicate
 
         # Augment
         img4, labels4, segments4 = copy_paste(img4, labels4, segments4, p=self.hyp['copy_paste'])
         if self.is_global:
-            #TODO
             feats4 = np.zeros((1, 512))
             img4, labels4 = random_perspective(img4,
                                            labels4,
@@ -879,16 +893,16 @@ class LoadImagesAndLabels(Dataset):
 
     @staticmethod
     def collate_fn(batch):
-        im, label, path, shapes, feat = zip(*batch)  # transposed
+        im, label, path, shapes, feat, is_coco = zip(*batch)  # transposed
         for i, lb in enumerate(label):
             lb[:, 0] = i  # add target image index for build_targets()
         for i, f in enumerate(feat):
             f[:, 0] = i  # add target image index for build_targets()
-        return torch.stack(im, 0), torch.cat(label, 0), path, shapes, torch.cat(feat, 0)
+        return torch.stack(im, 0), torch.cat(label, 0), path, shapes, torch.cat(feat, 0), is_coco
 
     @staticmethod
     def collate_fn4(batch):
-        img, label, path, shapes, feat = zip(*batch)  # transposed
+        img, label, path, shapes, feat, is_coco = zip(*batch)  # transposed
         n = len(shapes) // 4
         im4, label4, path4, shapes4 = [], [], path[:n], shapes[:n]
 
@@ -910,7 +924,7 @@ class LoadImagesAndLabels(Dataset):
         for i, lb in enumerate(label4):
             lb[:, 0] = i  # add target image index for build_targets()
 
-        return torch.stack(im4, 0), torch.cat(label4, 0), path4, shapes4, []
+        return torch.stack(im4, 0), torch.cat(label4, 0), path4, shapes4, [], []
 
 
 # Ancillary functions --------------------------------------------------------------------------------------------------
@@ -991,7 +1005,7 @@ def verify_image_label(args):
     # Verify one image-label pair
     im_file, lb_file, prefix = args
     nm, nf, ne, nc, msg, segments = 0, 0, 0, 0, '', []  # number (missing, found, empty, corrupt), message, segments
-    is_coco = 1
+    is_coco = 0
     try:
         # verify images
         im = Image.open(im_file)
@@ -1034,8 +1048,8 @@ def verify_image_label(args):
             nm = 1  # label missing
             lb = np.zeros((0, 5), dtype=np.float32)
         p = lb_file.split(os.path.sep)
-        if 'VOC' in p:
-            is_coco = 0
+        if 'coco' in p:
+            is_coco = 1
         return im_file, lb, shape, segments, nm, nf, ne, nc, msg, is_coco
     except Exception as e:
         nc = 1

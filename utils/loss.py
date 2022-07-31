@@ -120,16 +120,23 @@ class ComputeLoss:
         self.anchors = m.anchors
         self.device = device
 
-    def __call__(self, p, targets, class_distill=False, s_feat=None, t_feat_label=None, t_feat_global=None, is_global=False):  # predictions, targets
+    def __call__(self, p, targets, class_distill=False, s_feat=None, t_feat_label=None, t_feat_global=None, is_global=False, is_coco=None):  # predictions, targets
         lcls = torch.zeros(1, device=self.device)  # class loss
         lbox = torch.zeros(1, device=self.device)  # box loss
         lobj = torch.zeros(1, device=self.device)  # object loss
         lclassifier = torch.zeros(1, device=self.device)
+        # filter not coco label and feat
+        f = [] 
+        for i, target in enumerate(targets):
+            f.append(is_coco[int(target[0].item())])
+        targets = targets[f]
+        t_feat_label = t_feat_label[f]
+
         tcls, tbox, indices, anchors, indices_, filter_ = self.build_targets(p, targets)  # targets
         # Losses
         if class_distill and is_global:
             lclassifier += self.BCEclassifier(s_feat[1].to(self.device), t_feat_global)
-
+        
         for i, pi in enumerate(p):  # layer index, layer predictions
             b, a, gj, gi = indices[i]  # image, anchor, gridy, gridx
             tobj = torch.zeros(pi.shape[:4], dtype=pi.dtype, device=self.device)  # target obj
@@ -143,7 +150,7 @@ class ComputeLoss:
                     t_feat_label = t_feat_label.repeat(3, 1, 1)[j]
                     s_feat_label = s_feat[0].to(self.device)
                     s_feat_label = s_feat_label[gb_, :, gj_, gi_]
-                    lclassifier += self.BCEclassifier(s_feat_label, t_feat_label[:, 1:])
+                    lclassifier += self.BCEclassifier(s_feat_label, t_feat_label[:, 1:])  
 
                 # pxy, pwh, _, pcls = pi[b, a, gj, gi].tensor_split((2, 4, 5), dim=1)  # faster, requires torch 1.8.0
                 pxy, pwh, _, pcls = pi[b, a, gj, gi].split((2, 2, 1, self.nc), 1)  # target-subset of predictions
@@ -173,7 +180,9 @@ class ComputeLoss:
                 # Append targets to text file
                 # with open('targets.txt', 'a') as file:
                 #     [file.write('%11.5g ' * 4 % tuple(x) + '\n') for x in torch.cat((txy[i], twh[i]), 1)]
-
+            
+            pi = pi[is_coco]    # filter not coco pred
+            tobj = tobj[is_coco]    # filter not coco obj
             obji = self.BCEobj(pi[..., 4], tobj)
             lobj += obji * self.balance[i]  # obj loss
             if self.autobalance:

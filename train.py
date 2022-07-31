@@ -10,7 +10,7 @@ Tutorial: https://github.com/ultralytics/yolov5/wiki/Train-Custom-Data
 Usage:
     $ python path/to/train.py --data coco128.yaml --weights yolov5s.pt --img 640  # from pretrained (RECOMMENDED)
     $ python path/to/train.py --data coco128.yaml --weights '' --cfg yolov5s.yaml --img 640  # from scratch
-    $ python -m torch.distributed.launch --nproc_per_node 4 train.py --weights '' --cfg yolov5n_copy.yaml --data data/coco.yaml,data/VOC.yaml --epochs 500 --batch-size 256 --device 0,1,2,3 --hyp data/hyps/hyp.scratch-low_copy.yaml --name distill_global_VOC_notpre_0729 --clip --is_global
+    $ python -m torch.distributed.launch --nproc_per_node 1 train.py --weights '' --cfg yolov5n_copy.yaml --data data/coco.yaml,data/VOC.yaml --epochs 500 --batch-size 32 --device 0 --hyp data/hyps/hyp.scratch-low_copy.yaml --name distill_global_VOC_notpre_0729 --clip --is_global
 """
 
 import argparse
@@ -385,7 +385,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         if RANK in {-1, 0}:
             pbar = tqdm(pbar, total=nb, bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')  # progress bar
         optimizer.zero_grad()
-        for i, (imgs, targets, paths, _, t_feat) in pbar:  # batch -------------------------------------------------------------
+        for i, (imgs, targets, paths, _, t_feat, is_coco) in pbar:  # batch -------------------------------------------------------------
             callbacks.run('on_train_batch_start')
             ni = i + nb * epoch  # number integrated batches (since train start)
             imgs = imgs.to(device, non_blocking=True).float() / 255  # uint8 to float32, 0-255 to 0.0-1.0
@@ -425,11 +425,11 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                     pred, s_feat = model(imgs, class_distill=True, is_global=opt.is_global)
                     loss, loss_items = compute_loss(
                         pred, targets.to(device), class_distill=True, s_feat=s_feat, t_feat_label=t_feat.to(device),
-                        t_feat_global = t_feat_global.to(device) if opt.is_global else None, is_global=opt.is_global)  # loss scaled by batch_size
+                        t_feat_global = t_feat_global.to(device) if opt.is_global else None, is_global=opt.is_global, is_coco=is_coco)  # loss scaled by batch_size
                 else:
                     pred = model(imgs)
                     loss, loss_items = compute_loss(
-                        pred, targets.to(device))  # loss scaled by batch_size
+                        pred, targets.to(device), is_coco=is_coco)  # loss scaled by batch_size
                 dloss = loss_items[-1]
 
                 if RANK != -1:

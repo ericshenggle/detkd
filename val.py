@@ -190,7 +190,7 @@ def run(
     jdict, stats, ap, ap_class = [], [], [], []
     callbacks.run('on_val_start')
     pbar = tqdm(dataloader, desc=s, bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')  # progress bar
-    for batch_i, (im, targets, paths, shapes, _) in enumerate(pbar):
+    for batch_i, (im, targets, paths, shapes, _, _) in enumerate(pbar):
         callbacks.run('on_val_batch_start')
         t1 = time_sync()
         if cuda:
