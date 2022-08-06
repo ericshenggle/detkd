@@ -22,6 +22,7 @@ if platform.system() != 'Windows':
 
 from models.common import *
 from models.experimental import *
+from models.fgd import *
 from utils.autoanchor import check_anchor_order
 from utils.general import LOGGER, check_version, check_yaml, make_divisible, print_args
 from utils.plots import feature_visualization
@@ -126,13 +127,20 @@ class Model(nn.Module):
 
         # Init weights, biases
         initialize_weights(self)
+        self.distill_adpater1 = FeatureLoss(64, 768, '80_adpater')
+        self.distill_adpater2 = FeatureLoss(128, 768, '40_adpater')
+        self.distill_adpater3 = FeatureLoss(256, 768, '20_adpater')
         self.info()
         LOGGER.info('')
 
-    def forward(self, x, augment=False, profile=False, visualize=False, class_distill=False, is_global=False):
+    def forward(self, x, augment=False, profile=False, visualize=False, class_distill=False, is_global=False, t_feat_global=None):
         if augment:
             return self._forward_augment(x)  # augmented inference, None
-        return self._forward_once(x, profile, visualize, class_distill, is_global)  # single-scale inference, train
+        return self._forward_once(x, profile, visualize, class_distill, is_global, t_feat_global)  # single-scale inference, train
+
+    def distill_global(self, pred_S, pred_T):
+        loss = (self.distill_adpater1(pred_S[0], pred_T) + self.distill_adpater2(pred_S[1], pred_T) + self.distill_adpater3(pred_S[2], pred_T)) / 3
+        return loss
 
     def _forward_augment(self, x):
         img_size = x.shape[-2:]  # height, width
@@ -148,10 +156,10 @@ class Model(nn.Module):
         y = self._clip_augmented(y)  # clip augmented tails
         return torch.cat(y, 1), None  # augmented inference, train
 
-    def _forward_once(self, x, profile=False, visualize=False, class_distill=False, is_global=False):
+    def _forward_once(self, x, profile=False, visualize=False, class_distill=False, is_global=False, t_feat_global=None):
         y, dt = [], []  # outputs
         feat = []
-        g_feat = torch.zeros([3, x.shape[0], 512])
+        g_feat = []
         avg = nn.AdaptiveAvgPool2d((1, 1))
         for m in self.model:
             if m.f != -1:  # if not from previous layer
@@ -160,21 +168,23 @@ class Model(nn.Module):
                 self._profile_one_layer(m, x, dt)
             x = m(x)  # run
             if class_distill and is_global:
-                if m.i == 24:
-                    g_feat[0] = avg(x).squeeze()
-                elif m.i == 25:
-                    g_feat[1] = avg(x).squeeze()
-                elif m.i == 26:
-                    g_feat[2] = avg(x).squeeze()
+                if m.i == 4:
+                    g_feat.append(x)
+                elif m.i == 6:
+                    g_feat.append(x)
+                elif m.i == 24:
+                    g_feat.append(x)
             if class_distill:
                 if m.i == 24:
                     feat.append(x)
             y.append(x if m.i in self.save else None)  # save output
             if visualize:
                 feature_visualization(x, m.type, m.i, save_dir=visualize)
-        if is_global:
-            feat.append(torch.mean(g_feat, dim=0))
-        return x if not class_distill else (x, feat)
+        if class_distill and is_global:
+            loss = self.distill_global(g_feat, t_feat_global)
+        else:
+            loss = None
+        return x if not class_distill else (x, feat, loss)
 
     def _descale_pred(self, p, flips, scale, img_size):
         # de-scale predictions following augmented inference (inverse operation)

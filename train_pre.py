@@ -70,7 +70,6 @@ from utils.torch_utils import EarlyStopping, ModelEMA, de_parallel, select_devic
 LOCAL_RANK = int(os.getenv('LOCAL_RANK', -1))  # https://pytorch.org/docs/stable/elastic/run.html
 RANK = int(os.getenv('RANK', -1))
 WORLD_SIZE = int(os.getenv('WORLD_SIZE', 1))
-os.environ['TORCH_DISTRIBUTED_DEBUG'] = 'DETAIL'
 
 
 def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictionary
@@ -168,16 +167,15 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                 if num > 23:
                     k = k_layer[0] + '.' + str(num + 1) + '.' + k_layer[2]
                 new_state_dict[k] = v
-            ckpt_distill = torch.load('modules/yolov5n_distill_label.pt', map_location='cpu')
-            csd = ckpt_distill['model'].float().state_dict()
-            LOGGER.info(f'premodel_distill len is {len(csd)}')
-            for k, v in csd.items():
-                k_layer = k.split('.', 2)
-                num = int(k_layer[1])
-                if num == 24:
-                    new_state_dict[k] = v
+            # ckpt_distill = torch.load('modules/yolov5n_distill_label.pt', map_location='cpu')
+            # csd = ckpt_distill['model'].float().state_dict()
+            # LOGGER.info(f'premodel_distill len is {len(csd)}')
+            # for k, v in csd.items():
+            #     k_layer = k.split('.', 2)
+            #     num = int(k_layer[1])
+            #     if num == 24:
+            #         new_state_dict[k] = v
             csd = new_state_dict
-        LOGGER.info(f'model len is {len(csd)}')
         csd = intersect_dicts(csd, model.state_dict(), exclude=exclude)  # intersect
         model.load_state_dict(csd, strict=False)  # load
         LOGGER.info(f'Transferred {len(csd)}/{len(model.state_dict())} items from {weights}')  # report
@@ -185,7 +183,8 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         model = Model(cfg, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
 
     # Freeze
-    freeze = [f'model.{x}.' for x in (freeze if len(freeze) > 1 else range(freeze[0]))]  # layers to freeze
+    # freeze = [f'model.{x}.' for x in (freeze if len(freeze) > 1 else range(freeze[0]))]  # layers to freeze
+    freeze = [f'model.{x}.' for x in range(23)] + ['model.25.']
     for k, v in model.named_parameters():
         v.requires_grad = True  # train all layers
         if any(x in k for x in freeze):
@@ -413,22 +412,20 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
             # Forward
             with amp.autocast(enabled=cuda):
                 if opt.clip:
+                    pred, s_feat = model(imgs, class_distill=True, is_global=opt.is_global)
+                    loss, loss_items = compute_loss(
+                        pred, targets.to(device), class_distill=True, s_feat=s_feat[0], t_feat_label=t_feat.to(device), is_coco=is_coco)  # loss scaled by batch_size
                     if opt.is_global:
                         images = []
                         for img in imgs:
                             image = preprocess(img).unsqueeze(0)
                             images.append(image)
+                    
                         image_input = torch.cat(images, dim=0).to(device)
                         with torch.no_grad():
-                            t_feat_global = clip_model.encode_image(image_input) 
-                    pred, s_feat, g_loss = model(imgs, class_distill=True, is_global=opt.is_global, 
-                                            t_feat_global=t_feat_global.to(device) if opt.is_global else None)
-                    loss, loss_items = compute_loss(
-                        pred, targets.to(device), class_distill=True, s_feat=s_feat[0], t_feat_label=t_feat.to(device), is_coco=is_coco)  # loss scaled by batch_size
-                    if opt.is_global:
+                            t_feat_global = clip_model.encode_image(image_input)
+                        g_loss = model.distill(s_feat[1], t_feat_global.to(device))
                         loss += g_loss
-                        loss_items[-1] += g_loss / imgs.shape[0]
-                        
                 else:
                     pred = model(imgs)
                     loss, loss_items = compute_loss(

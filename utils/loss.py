@@ -120,7 +120,7 @@ class ComputeLoss:
         self.anchors = m.anchors
         self.device = device
 
-    def __call__(self, p, targets, class_distill=False, s_feat=None, t_feat_label=None, t_feat_global=None, is_global=False, is_coco=None):  # predictions, targets
+    def __call__(self, p, targets, class_distill=False, s_feat=None, t_feat_label=None, is_coco=None):  # predictions, targets
         lcls = torch.zeros(1, device=self.device)  # class loss
         lbox = torch.zeros(1, device=self.device)  # box loss
         lobj = torch.zeros(1, device=self.device)  # object loss
@@ -130,12 +130,7 @@ class ComputeLoss:
         for i, target in enumerate(targets):
             f.append(is_coco[int(target[0].item())])
         targets = targets[f]
-        t_feat_label = t_feat_label[f]
-
         tcls, tbox, indices, anchors, indices_, filter_ = self.build_targets(p, targets)  # targets
-        # Losses
-        if class_distill and is_global:
-            lclassifier += self.BCEclassifier(s_feat[1].to(self.device), t_feat_global)
         
         for i, pi in enumerate(p):  # layer index, layer predictions
             b, a, gj, gi = indices[i]  # image, anchor, gridy, gridx
@@ -147,8 +142,9 @@ class ComputeLoss:
                 if i == 2 and class_distill:        # 20 x 20 grid
                     gb_, _, gi_, gj_ = indices_[i]
                     j = filter_[i]
+                    t_feat_label = t_feat_label[f]
                     t_feat_label = t_feat_label.repeat(3, 1, 1)[j]
-                    s_feat_label = s_feat[0].to(self.device)
+                    s_feat_label = s_feat.to(self.device)
                     s_feat_label = s_feat_label[gb_, :, gj_, gi_]
                     lclassifier += self.BCEclassifier(s_feat_label, t_feat_label[:, 1:])  
 

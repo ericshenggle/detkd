@@ -694,11 +694,11 @@ class LoadImagesAndLabels(Dataset):
         img = img.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
         img = np.ascontiguousarray(img)
         if index < self.indices_split and self.is_coco[0] == 1:
-            is_coco = 1
+            is_coco = True
         elif index >= self.indices_split and self.is_coco[0] == 0:
-            is_coco = 1
+            is_coco = True
         else:
-            is_coco = 0
+            is_coco = False
 
         return torch.from_numpy(img), labels_out, self.im_files[index], shapes, feats_out, is_coco
 
