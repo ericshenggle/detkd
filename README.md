@@ -1,3 +1,29 @@
+## 路径：
+
+```
+.cache/
+	clip/
+		VIT-B-32.pt
+datasets/
+	coco/
+		feats/				97上有
+		images/
+		labels/
+	VOC/
+		images/
+		labels/
+detkd/
+```
+
+## 命令行：
+
+```python
+无额外数据集：
+python -m torch.distributed.launch --nproc_per_node 4 train.py --weights '' --cfg yolov5n_copy.yaml --data data/coco.yaml --epochs 500 --batch-size 256 --device 0,1,2,3 --hyp data/hyps/hyp.scratch-low_copy.yaml --name distill_global_notpre_0819 --clip --is_global
+```
+
+
+
 <div align="center">
 <p>
    <a align="left" href="https://ultralytics.com/yolov5" target="_blank">
@@ -13,8 +39,8 @@
    <a href="https://www.kaggle.com/ultralytics/yolov5"><img src="https://kaggle.com/static/images/open-in-kaggle.svg" alt="Open In Kaggle"></a>
    <a href="https://join.slack.com/t/ultralytics/shared_invite/zt-w29ei8bp-jczz7QYUmDtgo6r6KcMIAg"><img src="https://img.shields.io/badge/Slack-Join_Forum-blue.svg?logo=slack" alt="Join Forum"></a>
 </div>
-
 <br>
+
 <p>
 YOLOv5 🚀 is a family of object detection architectures and models pretrained on the COCO dataset, and represents <a href="https://ultralytics.com">Ultralytics</a>
  open-source research into future vision AI methods, incorporating lessons learned and best practices evolved over thousands of hours of research and development.
