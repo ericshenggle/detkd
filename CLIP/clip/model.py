@@ -230,7 +230,7 @@ class VisionTransformer(nn.Module):
         x = self.ln_pre(x)
 
         x = x[ :,1:, :].permute(0, 2, 1)
-        x = x.reshape(x.shape[0], x.shape[1], math.sqrt(x.shape[2]), -1)
+        x = x.reshape(x.shape[0], x.shape[1], int(math.sqrt(x.shape[2])), -1)
 
         # x = x.permute(1, 0, 2)  # NLD -> LND
         # x = self.transformer(x)
